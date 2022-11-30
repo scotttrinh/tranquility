@@ -4,16 +4,17 @@ use crate::{
     database::{Actor as DbActor, Object as DbObject},
     error::Error,
     format_uuid,
-    state::ArcState,
+    state::ArcState, util::Form, consts::MAX_BODY_SIZE,
 };
 use axum::{
-    extract::Path,
+    extract::{Path, ContentLengthLimit},
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, patch},
     Extension, Json, Router,
 };
+use serde::Deserialize;
 use tranquility_types::{
-    activitypub::Actor,
+    activitypub::{Actor, Tag, Attachment},
     mastodon::{Account, FollowResponse, Source},
 };
 use uuid::Uuid;
@@ -118,6 +119,51 @@ async fn verify_credentials(
     Ok(Json(mastodon_account))
 }
 
+#[derive(Deserialize)]
+pub struct UpdateForm {
+    name: Option<String>,
+    summary: Option<String>,
+    tag: Option<Vec<Tag>>,
+    icon: Option<Attachment>,
+    image: Option<Attachment>,
+    manually_approves_followers: Option<bool>,
+}
+
+async fn update_credentials(
+    Extension(state): Extension<ArcState>,
+    Authorisation(authorized_db_actor): Authorisation,
+    ContentLengthLimit(Form(form)): ContentLengthLimit<Form<UpdateForm>, MAX_BODY_SIZE>,
+) -> Result<impl IntoResponse, Error> {
+  let mut db_actor = DbActor::get(&state.db_pool, authorized_db_actor.id).await?;
+  let mut actor: Actor = serde_json::from_value(db_actor.actor)?;
+  if let Some(name) = form.name {
+    actor.name = name;
+  }
+  if let Some(summary) = form.summary {
+    actor.summary = summary;
+  }
+  if let Some(tag) = form.tag {
+    actor.tag = tag;
+  }
+  if let Some(icon) = form.icon {
+    actor.icon = Some(icon);
+  }
+  if let Some(image) = form.image {
+    actor.image = Some(image);
+  }
+  if let Some(manually_approves_followers) = form.manually_approves_followers {
+    actor.manually_approves_followers = manually_approves_followers;
+  }
+
+  db_actor.actor = serde_json::to_value(actor)?;
+
+  DbActor::update(&state.db_pool, &db_actor).await?;
+
+  let mastodon_account: Account = db_actor.clone().into_mastodon(&state).await?;
+
+  Ok(Json(mastodon_account))
+}
+
 pub fn routes() -> Router {
     Router::new()
         .route("/accounts/:id", get(accounts))
@@ -127,4 +173,5 @@ pub fn routes() -> Router {
         //.route("/accounts/:id/statuses", get(statuses))
         .route("/accounts/:id/unfollow", post(unfollow))
         .route("/accounts/verify_credentials", get(verify_credentials))
+        .route("/accounts/update_credentials", patch(update_credentials))
 }

@@ -82,6 +82,7 @@ impl Actor {
         Ok(actor)
     }
 
+    /// Update an actor by their ID
     pub async fn update(conn_pool: &PgPool, actor: &Self) -> Result<Self, Error> {
         let actor = sqlx::query_as!(
             Actor,
