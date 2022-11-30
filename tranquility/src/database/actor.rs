@@ -81,4 +81,22 @@ impl Actor {
 
         Ok(actor)
     }
+
+    pub async fn update(conn_pool: &PgPool, actor: &Self) -> Result<Self, Error> {
+        let actor = sqlx::query_as!(
+            Actor,
+            r#"
+                UPDATE actors
+                SET actor = $1
+                WHERE id = $2
+                RETURNING *
+            "#,
+            actor.actor,
+            actor.id
+        )
+        .fetch_one(conn_pool)
+        .await?;
+
+        Ok(actor)
+    }
 }
